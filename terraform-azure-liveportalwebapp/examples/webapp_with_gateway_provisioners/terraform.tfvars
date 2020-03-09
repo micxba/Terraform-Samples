@@ -1,0 +1,8 @@
+app_service_name    = "test-moduletest"
+resource_group_name = "Module-Test"
+app_service_plan_id = "/subscriptions/be62f057-87be-48e5-9c5f-c6fc74ac9d19/resourceGroups/Module-Test/providers/Microsoft.Web/serverFarms/test_ase_plan"
+domain_name         = "internetbanking.us"
+gateway_name        = "default-gateway"
+gateway_resource_group_name = "Module-Test"
+frontend_port       = "port_80"
+http_setting        = "default-http-setting"

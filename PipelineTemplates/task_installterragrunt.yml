@@ -1,0 +1,22 @@
+parameters:
+    terragruntversion: ''
+steps:
+  - task: Bash@3
+    displayName: 'Install Terragrunt ${{ parameters.terragruntversion }}'
+    env:
+      TERRAGRUNT_VERSION: ${{ parameters.terragruntversion }}
+    inputs:
+      targetType: 'inline'
+      script: |
+        TERRAGRUNT_DIRECTORY=$AGENT_TOOLSDIRECTORY/terragrunt/${TERRAGRUNT_VERSION}/x64
+        curl -LOs https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+        curl -LOs https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/SHA256SUMS
+        shasum -a 256 -c SHA256SUMS 2>&1 | grep "terragrunt_linux_amd64:\sOK"
+        mkdir -p $TERRAGRUNT_DIRECTORY
+        mv terragrunt_linux_amd64 ${TERRAGRUNT_DIRECTORY}/terragrunt
+        chmod +x ${TERRAGRUNT_DIRECTORY}/terragrunt
+        rm SHA256SUMS
+        export PATH=$TERRAGRUNT_DIRECTORY:$PATH
+        echo "##vso[task.prependpath]$TERRAGRUNT_DIRECTORY"
+        terragrunt --version
+  

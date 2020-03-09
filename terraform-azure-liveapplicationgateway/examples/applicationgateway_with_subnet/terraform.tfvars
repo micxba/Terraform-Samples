@@ -1,0 +1,6 @@
+resource_group_name            = "Module-Test"
+virtual_network_name           = "Module-Test-Vnet"
+gateway_subnet_address_prefix  = "10.0.3.0/24"
+public_ip_name = "ASE-Gateway-Public-Ip"
+location                       = "centralus"
+application_gateway_name       = "ASE-Gateway"

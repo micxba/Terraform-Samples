@@ -1,0 +1,153 @@
+// package test
+
+// import (
+// 	"github.com/gruntwork-io/terratest/modules/terraform"
+// 	"testing"
+// 	"time"
+// 	"github.com/Azure/go-autorest/autorest/azure/auth"
+// 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2016-07-01/resources"
+// 	"context"
+// )
+// func TestVirtualnetwork_with_resourcegroup(t *testing.T) {
+// 	// Not using Parallel as it has a single test
+// 	// authorizer, err := auth.NewAuthorizerFromEnvironment()
+// 	// getting target subscription id
+// 	// Providing Address of Terraform Files
+// 	terraformOptions := &terraform.Options{
+// 		// Providing the directory where Terraform files are located
+// 		TerraformDir: "../examples/virtualnetwork_with_resourcegroup",
+// 		//  The var file paths to pass to Terraform commands using -var-file option.
+// 		// if there is a terraform.tfvars file then we dont have to use this explicitly
+// 	    // VarFiles: []string{"test.tfvars"},
+// 	}
+// 	//  Destroy after Apply and giving the Outputs
+// 	defer terraform.Destroy(t, terraformOptions)
+// 	// Does Tf init and Apply. So any of the resources in the Terraform Script will be deployed and may incur cost.
+// 	terraform.InitAndApply(t, terraformOptions)
+// 	// Outputs all the Output variables defined in the outputs.tf file
+// 	terraform.OutputAll(t, terraformOptions)
+// 	resourcegroup_name:= terraform.Output(t, terraformOptions, "test_virtualnetwork_rg_name")
+// 	t.Log(resourcegroup_name)
+// 	time.Sleep(20 * time.Second)
+// 	env_settings, _:= auth.GetSettingsFromEnvironment()
+// 	subscription_id:= env_settings.GetSubscriptionID()
+// 	// getting group client
+// 	groupsclient := resources.NewGroupsClient(subscription_id)
+// 	// Checking existence of the created resource group
+// 	ctx:= context.TODO()
+// 	result,err := groupsclient.CheckExistence(ctx, resourcegroup_name)
+// 	if err!= nil{
+// 		t.Log("Resource Group not found with error", err)
+// 	}else{
+// 		t.Log(result)
+// 	}
+// 	time.Sleep(20 * time.Second)
+// }
+// f, _:= auth.GetSettingsFromEnvironment()
+	// fmt.Println("Hello")
+	// fmt.Println(f.GetSubscriptionID())
+	// c,err:=f.GetClientCredentials()
+	// if err!=nil {
+	// 	fmt.Println("encountered an err of type:",err)
+	// }else{
+	// 	fmt.Println(c)
+	// }
+    // groupListResultIterator := resources.NewGroupListResultIterator(groupListResult)
+	// onErrorFail(err, "List Failed")
+	// if groupList.Value != nil && len(*groupList.Value) > 0 {
+	// 	for _, group := range *groupList {
+	// 		fmt.Printf(*group.name)
+	// 	}
+	// }
+	// fmt.Println("group is", group)
+	// fmt.Println("err is", err)
+	// if err!= nil{
+	// 		fmt.Println("Resource Group not found with error", err)
+	// 	}else{
+	// 		fmt.Println(group)
+	// 	}
+	// env_settings, _:= auth.GetSettingsFromEnvironment()
+	// subscription_id:= env_settings.GetSubscriptionID()
+	// getting group client
+	// groupsclient := resources.NewGroupsClient(subscription_id)
+	// Checking existence of the created resource group
+	// ctx:= context.TODO()
+	// resourcegroup_name := "AOBLogsStorageResourceGroup"
+	// group, err:= groupsClient.Get(ctx, resourcegroup_name)
+	// // result,err := groupsclient.CheckExistence(ctx, resourcegroup_name)
+	// if err!= nil{
+	// 	fmt.Println("Resource Group not found with error", err)
+	// }else{
+	// 	fmt.Println(group)
+	// }
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-05-01/resources"
+	"github.com/Azure/go-autorest/autorest/azure/auth"
+)
+
+func main() {
+	// GetSettingsFromEnvironment returns EnvironmentSettings and error
+	envSettings, _ := auth.GetSettingsFromEnvironment()
+	// GetSubscriptionID works on EnvironmentSettings and returns a String
+	subscriptionID := envSettings.GetSubscriptionID()
+	fmt.Println("subscription is", subscriptionID)
+	// NewGroupsClient takes the Subscription Id and create an instance of GroupsClient client. It returns a GroupsClient
+	groupsClient := resources.NewGroupsClient(subscriptionID)
+	// Get Authorizer creates a Authorizer configured from environment variables. It works on EnvironmentSettings and returns autorest.Authorizer and error
+	authorizer, err := envSettings.GetAuthorizer()
+	if err == nil {
+		groupsClient.Authorizer = authorizer
+		fmt.Println("authorizer is", groupsClient.Authorizer)
+	} else {
+		fmt.Println(err)
+	}
+	// Context carries deadlines, cancellation signals, and other request-scoped values.
+	// Context is the input to groupsClient and hence it is being initialized. 
+	// context.Background() returns a non-nil empty context. It is never canceled, has no values and has no deadline.
+	ctx := context.Background()
+	fmt.Println("Context is", ctx)
+	// groupsClient.List gets all the resource groups for a subscription. The parameters are context, filter example $filter=tagNAme eq 'tag1' and tagValue eq 'value1'. and top the number of results to return. If it is nil, it returns all results.
+	// It returns GroupListResultPage and error
+	groupListResult, err := groupsClient.List(ctx, "", nil)
+	// groupListResult.Values takes GroupListResultPage abd returns the slice of values for the current page or nil
+	groups := groupListResult.Values()
+	resourcegroupToFind := "xyz"
+	var resourcegroupName []string
+	fmt.Println(len(groups), "Resource Groups in", subscriptionID)
+	fmt.Println("anf they are")
+	for i:=0; i<len(groups); i++ {
+		// fmt.Println(*groups[i].Name)
+		resourcegroupName = append(resourcegroupName, *groups[i].Name)
+	}
+	for j:=0; j<len(resourcegroupName); j++{
+		fmt.Println(resourcegroupName[j])
+	}
+	// fmt.Println(rgName)
+	fmt.Println ("attemp to finding",resourcegroupToFind)
+	// groupsClient.CheckExistence checks wheather a Resource Group Exists. It takes Context and resourcegroupName. Returns autorest.Response, error
+	// groupsClient.CheckExistence(ctx, resourcegroupName)
+	// if err1==nil {
+	// 	fmt.Println(resourcegroupName, "found",response)
+	// }else {
+	// 	fmt.Println("Error finding", resourcegroupName, "with code", err1)
+	// }
+	// contains is a function which takes a Slice and string to find if the string exists in the slice. It returns a boolean value.
+	if contains(resourcegroupName, resourcegroupToFind) {
+		fmt.Println(resourcegroupToFind, "found")
+	}else {
+		fmt.Println(resourcegroupToFind, "not found")
+	}	
+}
+func contains (slice []string, item string) bool {
+	for _, find := range slice {
+		if find==item {
+			return true
+		}
+	}
+	return false
+}

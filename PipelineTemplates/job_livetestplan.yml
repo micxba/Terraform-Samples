@@ -1,0 +1,71 @@
+parameters: 
+  ConfigurationDirectory
+jobs:
+  - job: Validate_and_Review_Changes_using_Go_Test
+    steps:
+    - task: DownloadSecureFile@1
+      displayName: Download Backend Configuration from the secure file
+      name: BackendConfig
+      inputs:
+        secureFile: $(BackendSecureFile)
+    - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+      displayName: Replace tokens in **/*.tf -PATTF
+      inputs: 
+         targetFiles: '**/*.tf'
+         tokenPrefix: '__'
+         tokenSuffix: '__'
+    - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@0
+      displayName: Install Terraform
+      inputs:
+        terraformVersion: $(TerraformVersion)
+    - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-cli.TerraformCLI@0
+      displayName: Initialize 
+      inputs: 
+        command: init
+        workingDirectory: ${{parameters.ConfigurationDirectory}}
+        commandOptions: -backend-config=$(AGENT.TEMPDIRECTORY)/lowerbackend.hcl
+    - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-cli.TerraformCLI@0
+      displayName: Validate 
+      inputs:
+        command: validate
+        workingDirectory: ${{parameters.ConfigurationDirectory}}
+    - task: GoTool@0
+      displayName: Downloading Go to run Plan Changes
+      inputs:
+        goPath: D:\a\1\go
+        version: $(GoVersion)
+    - task: PowerShell@2
+      displayName: Download Dep, Copy files to Go Path and ensure dependencies
+      inputs:
+        errorActionPreference: stop
+        targetType: inline
+        script: |
+          mkdir -p  $env:GOPATH\src
+          Copy-Item -Path "D:\a\1\s" -Destination "D:\a\1\go\src" -Recurse 
+          choco install dep
+    - task: PowerShell@2
+      displayName: Test Plan Changes
+      inputs:
+        errorActionPreference: stop
+        targetType: inline
+        script: |
+          $env:ARM_CLIENT_ID = "$(ClientId)" 
+          $env:ARM_CLIENT_SECRET = "$(ClientSecret)"
+          $env:ARM_SUBSCRIPTION_ID = "$(SubscriptionId)"
+          $env:ARM_TENANT_ID = "$(TenantId)"
+          Set-Location  $env:GOPATH\src\s\${{parameters.ConfigurationDirectory}}\test
+          dep ensure 
+          # go get -u github.com/jstemmer/go-junit-report
+          # go test -v 2>&1 | go-junit-report > report.xml
+          $planOutput = go test -v 
+          $resourceChangesIndex = [array]::indexof($planOutput, $planOutput -like '*resource changes are*')
+          Write-Host $planOutput[$resourceChangesIndex]
+    - task: PublishTestResults@2
+      inputs:
+        testRunner: JUnit
+        testResultsFiles: $(System.DefaultWorkingDirectory)/**/report.xml
+    - task: CopyFiles@2
+      displayName: Copy file to the Staging ConfigurationDirectory
+      inputs: 
+        Contents: ${{parameters.ConfigurationDirectory}}/**
+        TargetFolder: $(Build.ArtifactStagingDirectory)

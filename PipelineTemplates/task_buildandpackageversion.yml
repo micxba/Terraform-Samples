@@ -1,0 +1,37 @@
+parameters:
+  version: ''
+steps:
+- task: Powershell@2
+  displayName: Set Build and Package version
+  inputs:
+    targetType: inline
+    errorActionPreference: stop
+    script: |
+        if ([String]::IsNullorEmpty("${{parameters.version}}")) {
+            Write-Host "##vso[task.LogIssue type=error;] version not specified"
+            Write-Host "##vso[task.complete result=Failed;]Failed"
+        }
+        $version = "${{parameters.version}}"
+        $branch = $env:BUILD_SOURCEBRANCH
+        $date = Get-Date -Format "MMddyyyy-HHmmss"
+        $commithash = ($env:BUILD_SOURCEVERSION).Substring(0, 8)
+        $versionsuffix = $date+"+sha-"+$commithash
+        Switch -Wildcard ($branch) {
+            "refs/heads/master" { 
+                $packageVersionSuffix = "$version$versionsuffix"
+                $buildversion = "$version-$versionsuffix"
+            }
+            "refs/heads/develop" {
+                $packageversion = "beta$versionsuffix"
+                $buildversion = "$version-$packageversion"        
+            }
+            "refs/heads/release/*" {
+                $packageversion = "rc$versionsuffix"
+                $buildversion = "$version-$packageversion"
+            }
+            default {
+                $packageversion = "alpha$versionsuffix"
+                $buildversion = "$version-$packageversion"
+            }
+        }
+        Write-Host "##vso[build.updatebuildnumber]$buildversion"

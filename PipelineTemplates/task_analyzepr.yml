@@ -1,0 +1,158 @@
+parameters:
+  name: 'AnalyzeTerraformPullRequest'
+  serialize: true
+
+steps:
+- task: PowerShell@2
+  displayName: 'Analyze Terraform pull request'
+  name: ${{ parameters.name }}
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  inputs:
+    targetType: inline
+    pswh: true
+    script: |
+      function ExitWithIssue($message) {
+          Write-Host "##vso[task.logissue type=error]$message"
+          Exit 1
+      }
+
+      # This regex matches a markdown fenced JSON block.
+      $jsonBlockMatcher = '(?sm)```json\s*(?<data>\{.+\})\s*```'
+
+      # Helpful message to explain why parsing the Terraform PR data block may
+      # have failed. Note backtick is the escape character in Powershell so it's
+      # a little ugly looking.
+      $validationMessage = "You must specify a JSON structure with Terraform and module info inside markdown fences in the PR description:
+      ``````json
+      {
+        `"terraform`": `"0.12.16`",
+        `"module`": `"ec2fee07-1c89-4a62-a148-eca9afd8d3bf/westus/dev/mysql`"
+      }
+      ``````
+      If this is not a deployable change (eg, only a README change, no deploy required) set deploy=false in the JSON:
+      ``````json
+      {
+        `"deploy`": false
+      }
+      ``````"
+
+      # Use System.AccessToken as a bearer token to call the REST API.
+      # https://github.com/microsoft/azure-pipelines-tasks/blob/f36e3fc858c9617258b2af94822bc72875f6473b/Tasks/QueryWorkItemsV0/task.json#L71
+      $headers = @{ Authorization = ("Bearer {0}" -f $env:SYSTEM_ACCESSTOKEN) }
+      $uri = "$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.ID)/pullrequests?api-version=5.1&searchCriteria.status=active"
+      $openPullRequests = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
+      $pr = $openPullRequests.value | Where-Object { $_.pullRequestId -eq $(System.PullRequest.PullRequestId) }
+
+      # Only active PRs can be deployed because inactive/closed are either
+      # abandoned or already merged.
+      $openCount = ($openPullRequests | Measure-Object).Count
+      If ($openCount -eq 0) {
+          ExitWithIssue "No pull requests are active. You can't re-run the build for an inactive PR."
+      }
+
+      # All Terraform PRs must have the JSON data block explaining what they
+      # intend to deploy.
+      If(-not ($pr.description -match $jsonBlockMatcher)) {
+          ExitWithIssue "No JSON block found. $validationMessage"
+      }
+
+      # Setting { deploy = true } in the JSON will indicate the PR is not
+      # deployable. If that happens, there's no need to look for conflicts or to
+      # set any module data.
+      $currentData = $Matches.data | ConvertFrom-Json
+      If($Null -ne $currentData.deploy -and -not $currentData.deploy) {
+          Write-Host "This is a no-deploy pull request. Setting ${{ parameters.name }}.TerraformDeploy to 'false',${{ parameters.name }}.TerraformDestroy to 'false' and skipping other settings."
+          Write-Host "##vso[task.setvariable variable=TerraformDeploy;isOutput=true]false"
+          Write-Host "##vso[task.setvariable variable=TerraformDestroy;isOutput=true]false"
+          return
+      }
+
+      Write-Host "This is a deployable pull request. Setting ${{ parameters.name }}.TerraformDeploy to 'true'."
+      Write-Host "##vso[task.setvariable variable=TerraformDeploy;isOutput=true]true"
+
+      # Deployable PRs need to set { terraform = "x.y.z" } with the expected
+      # Terraform version. This is both so the agent can install the right
+      # version and to ensure there's no unexpected change in Terraform version.
+      If([String]::IsNullOrWhiteSpace($currentData.terraform)) {
+          ExitWithIssue "No Terraform version found in JSON. $validationMessage"
+      }
+
+      # Deployable PRs need to set { module = "path/to/module" } with the path
+      # to the module that changed. If nothing changed, it should be marked
+      # non-deployable. If something changed, it should be a conscious change.
+      If ([String]::IsNullOrWhiteSpace($currentData.module)) {
+          ExitWithIssue "No module location found in JSON. $validationMessage"
+      }
+
+      # "Normalize" by removing leading/trailing slashes and verify the
+      # specified module actually exists. No path typos.
+      $currentData.module = $currentData.module.Trim('/')
+      If (-not (Test-Path $currentData.module -PathType Container)) {
+          ExitWithIssue "Module path $($currentData.module) not found. Note paths are case-sensitive. $validationMessage"
+      }
+
+      if ($currentData.destroy -eq "true") {
+        Write-Host "Terraform Destroy (${{ parameters.name }}.TerraformDestroy): $($currentData.destroy)" 
+        Write-Host "##vso[task.setvariable variable=TerraformDestroy;isOutput=true]$($currentData.destroy)"
+        Write-Host "The deploy will destroy in the following version and module path"
+      } else { 
+        Write-Host "The deploy has nothing to destroy"
+        Write-Host "##vso[task.setvariable variable=TerraformDestroy;isOutput=true]false"
+      }
+
+      Write-Host "Terraform version (${{ parameters.name }}.TerraformVersion): $($currentData.terraform)"
+      Write-Host "##vso[task.setvariable variable=TerraformVersion;isOutput=true]$($currentData.terraform)"
+      Write-Host "Module path to deploy (${{ parameters.name }}.ModulePath): $($currentData.module)"
+      Write-Host "##vso[task.setvariable variable=ModulePath;isOutput=true]$($currentData.module)"
+
+      # You can disable pull request serialization in "emergency" situations by
+      # setting the serialize parameter to false.
+      If ("${{ parameters.serialize }}" -ne "true") {
+          Write-Host "Serialization of PRs is disabled. Skipping check."
+          return
+      }
+
+      # Get the older PRs. If there aren't any, we don't need to keep going.
+      # Note this assumes pull request IDs are sequential integers - PR 17 is
+      # "older" than PR 18.
+      $olderPullRequests = $openPullRequests.value | Where-Object { $_.pullRequestId -lt $(System.PullRequest.PullRequestId) }
+      $olderCount = ($olderPullRequests | Measure-Object).Count
+      If ($olderCount -eq 0) {
+          Write-Host "No pull requests found older than the current request."
+          return
+      } Else {
+          Write-Host "Found $olderCount pull request(s) older than current."
+      }
+
+      # Compare older PR data to the current PR. If there's an older PR that
+      # acts on the same module as this PR, abort - the older PR needs to be
+      # handled first.
+      $olderPullRequests | ForEach-Object {
+          $olderPr = $_
+          If(-not ($olderPr.description -match $jsonBlockMatcher)) {
+              Write-Host "No data: PR $($olderPr.pullRequestId) `"$($olderPr.title)`""
+              return
+          }
+
+          $olderData = $Matches.data | ConvertFrom-Json
+          If($Null -ne $olderData.deploy -and -not $olderData.deploy) {
+              Write-Host "Not deployable: PR $($olderPr.pullRequestId) `"$($olderPr.title)`""
+              return
+          }
+
+          If($Null -eq $olderData.module) {
+              Write-Host "No module specified: PR $($olderPr.pullRequestId) `"$($olderPr.title)`""
+              return
+          }
+
+          $olderData.module = $olderData.module.Trim('/')
+          If (-not ($currentData.module -eq $olderData.module)) {
+              Write-Host "Different module specified: PR $($olderPr.pullRequestId) `"$($olderPr.title)`" [$($olderData.module)]"
+              return
+          }
+
+          ExitWithIssue "Pull request $($olderPr.pullRequestId) `"$($olderPr.title)`" is older and also targets $($olderData.module). Address all changes in the older PR (or abandon the older PR) before attempting this PR pipeline again."
+      }
+
+      Write-Host "This pull request isn't blocked by anything else. Allowing pipeline to continue."

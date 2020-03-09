@@ -1,0 +1,16 @@
+steps:
+- task: Bash@3
+  displayName: 'Install GraphViz'
+  inputs:
+    targetType: inline
+    script: |
+        sudo apt-get install -y graphviz
+- task: Bash@3
+  displayName: Output Graph
+  inputs:
+    workingDirectory: test/fixtures/plan
+    targetType: inline
+    failOnStderr: true
+    script: |
+        terraform graph -draw-cycles | tee $(Build.ArtifactStagingDirectory)/graph.dot
+        dot -Tpng $(Build.ArtifactStagingDirectory)/graph.dot > $(Build.ArtifactStagingDirectory)/graph.png

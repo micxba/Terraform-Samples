@@ -1,0 +1,28 @@
+name: $(Build.SourceBranchName)-$(Build.Reason)
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: PipelineTemplates
+pool:
+  vmImage: vs2017-win2016
+trigger:
+- master
+- develop
+- feature/*
+- release/*
+- hotfix/*
+pr:
+- master
+- develop
+- feature/*
+- release/*
+- hotfix/*
+variables:
+- template: moduletestvariables.yml@templates
+stages:
+  - stage: TestModule
+    jobs:
+      - template: modulevalidate.yml@templates
+      - template: moduleterratest.yml@templates
+      # trying to fail build for tag errors

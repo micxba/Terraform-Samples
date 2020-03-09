@@ -1,0 +1,70 @@
+jobs:
+  - job: TerraformValidate
+    steps:
+      - task: DownloadSecureFile@1
+        displayName: Download Backend Configuration from the secure file
+        name: BackendConfig
+        inputs:
+          secureFile: $(BackendSecureFile)
+      - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+        displayName: Replace tokens in **/*.tf -PATTF
+        inputs: 
+          targetFiles: '**/*.tf'
+          tokenPrefix: '__'
+          tokenSuffix: '__'
+      - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@0
+        displayName: Install Terraform
+        inputs: 
+          terraformVersion: $(terraformversion)
+      # - template: templates/task_tf_initializeandvalidate
+      #   parameters:
+      #     directory: ${{parameters.terraformdirectory}}
+      - task: PowerShell@2
+        displayName: Validate in all folders
+        inputs:
+          errorActionPreference: stop
+          targetType: inline
+          script: |
+            Set-Location $(System.DefaultWorkingDirectory)
+            terraform init
+            terraform validate
+            $modulefolders = Get-ChildItem -Directory -recurse -Depth 1 | Where-Object {$_.name -like "examples" -or $_.name -like "modules"}
+            Write-Host "There are" $modulefolders.Length "module folders and they are" $modulefolders 
+            write-Host $modulefolders.Length
+            foreach ($modulefolder in $modulefolders)
+            {
+                Write-Host "inside" $modulefolder.name
+                Set-Location $modulefolder.fullname
+                Write-Host "subfolders inside" $modulefolder.name "are"
+                $subfolders = Get-ChildItem -Directory -recurse
+                foreach ($subfolder in $subfolders)
+                {
+                    Write-Host $subfolder.name
+                }
+                terraform init
+                if ($LASTEXITCODE -ne 0)
+                {
+                    Throw "Error initializing $modulefolder.name"
+                }
+                terraform validate
+                if ($LASTEXITCODE -ne 0)
+                {
+                    Throw "Error validating $modulefolder.name"
+                }
+                $configfolders += $subfolders
+            }
+            foreach ($configfolder in $configfolders)
+            {
+                Write-Host "inside" $configfolder.name
+                Set-Location $configfolder.fullname
+                terraform init -backend-config=$(AGENT.TEMPDIRECTORY)/backend.hcl
+                if ($LASTEXITCODE -ne 0)
+                {
+                    Throw "Error validating $modulefolder.name"
+                }
+                terraform validate
+                if ($LASTEXITCODE -ne 0)
+                {
+                    Throw "Error Initializing $modulefolder.name"
+                }
+            }

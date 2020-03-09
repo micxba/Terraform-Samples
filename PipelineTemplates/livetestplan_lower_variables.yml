@@ -1,0 +1,8 @@
+variables:
+- group: TFSecrets
+- name: TerraformVersion
+  value: 0.12.12
+- name: BackendSecureFile
+  value: lowerbackend.hcl
+- name: GoVersion
+  value: 1.12

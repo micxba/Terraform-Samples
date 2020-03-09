@@ -1,0 +1,23 @@
+parameters:
+  dockerversion: ''
+  terraformversion: ''
+steps:
+- task: DockerInstaller@0
+  displayName: Install Docker
+  inputs:
+    dockerVersion: ${{parameters.dockerversion}}
+- task: DownloadSecureFile@1
+  displayName: Download Terratest Environment File
+  name: testenv
+  inputs: 
+    secureFile: test.env
+- bash: |
+    cd $(Build.SourcesDirectory)/module-terratest
+    docker build --build-arg TERRAFORM_VERSION=${{parameters.terraformversion}} -t terratest:latest .
+    docker run -v $(Build.SourcesDirectory):/go/src/Module -v $(Build.ArtifactStagingDirectory):/output --env-file $(testenv.secureFilePath) terratest:latest 
+  displayName: Run Tests
+- task: PublishTestResults@2
+  displayName: Publish Test Results
+  inputs:
+    testResultsFiles: '$(Build.ArtifactStagingDirectory)/junit_test_results.xml'
+

@@ -1,0 +1,117 @@
+parameters:
+  RemoteState_access_key: ''
+jobs:
+   - job: Terratest
+     dependsOn: TerraformValidate
+     condition: and(succeeded(), or(ne(variables['Build.Reason'], 'PullRequest'), eq(variables['System.PullRequest.TargetBranch'], 'refs/heads/master')))
+     steps:
+      - checkout: self
+        persistCredentials: true
+      - task: DownloadSecureFile@1
+        displayName: Download Backend Configuration from the secure file
+        name: BackendConfig
+        inputs:
+          secureFile: $(BackendSecureFile)
+      - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+        displayName: Replace tokens in **/*.tf -PATTF
+        inputs: 
+          targetFiles: '**/*.tf'
+          tokenPrefix: '__'
+          tokenSuffix: '__'
+      - task: PowerShell@2
+        displayName: Access to OAuth token
+        inputs: 
+          errorActionPreference: stop
+          targetType: inline
+          script: |
+            $url = "$($env:SYSTEM_TEAMFOUNDATIONCOLLECTIONURI)$env:SYSTEM_TEAMPROJECTID/_apis/build/definitions/$($env:SYSTEM_DEFINITIONID)?api-version=4.1-preview"
+            Write-Host "URL: $url"
+            $pipeline = Invoke-RestMethod -Uri $url -Headers @{
+            Authorization = "Bearer $env:TOKEN"
+            }
+            Write-Host "Pipeline = $($pipeline | ConvertTo-Json -Depth 100)"
+        env:
+          TOKEN: $(system.accesstoken)
+      - task: GoTool@0
+        displayName: Install Go
+        inputs:
+          version: $(goversion)
+          goPath: D:\a\1\go
+      - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@0
+        displayName: Install Terraform
+        inputs: 
+          terraformVersion: $(terraformversion)
+      # - task: PowerShell@2
+      #   displayName: Download Dep and copying files to gopath
+      #   inputs:
+      #     errorActionPreference: stop
+      #     targetType: inline
+      #     script: |
+      #       go env GOPATH
+      #       mkdir -p  $env:GOPATH\src
+      #       Copy-Item -Path "D:\a\1\s" -Destination "D:\a\1\go\src" -Recurse 
+      #       choco install dep
+      # - task: PowerShell@2
+      #   displayName: Initialize in all folders
+      #   inputs:
+      #     errorActionPreference: stop
+      #     targetType: inline
+      #     script: |
+      #       Set-Location  $env:GOPATH\src\s\examples
+      #       $subfolders = Get-ChildItem -Directory -recurse
+      #       Write-Host "The subfolders are:" $subfolders
+      #       ForEach ($subfolder in $subfolders)
+      #       {
+      #       Write-Host "In the Subfolder" $subfolder.name
+      #       Set-Location $subfolder.FullName
+      #       terraform init -backend-config=$(AGENT.TEMPDIRECTORY)/backend.hcl
+      #       terraform validate
+      #       } 
+      - task: PowerShell@2
+        displayName: Run Terratest
+        inputs:
+          errorActionPreference: stop
+          targetType: inline
+          script: |
+            # require the ARM variables to run terraform Package in test
+            $env:ARM_CLIENT_ID = "$(ClientId)" 
+            $env:ARM_CLIENT_SECRET = "$(ClientSecret)"
+            $env:ARM_SUBSCRIPTION_ID = "$(SubscriptionId)"
+            $env:ARM_TENANT_ID = "$(TenantId)"
+            # require the AZURE variables to create authorizer for go Clients in Azure
+            $env:AZURE_CLIENT_ID = "$(ClientId)" 
+            $env:AZURE_CLIENT_SECRET = "$(ClientSecret)"
+            $env:AZURE_SUBSCRIPTION_ID = "$(SubscriptionId)"
+            $env:AZURE_TENANT_ID = "$(TenantId)"
+            # require if want to run go-junit-result
+            # $env:PATH += ";D:\a\1\go\bin"
+            # this is passed to the terraform remote state block
+            $env:TF_VAR_access_key = "${parameters.RemoteState_access_key}"
+            Write-Host $env:TF_VAR_access_key
+            Write-Host $env:AZURE_CLIENT_ID 
+            # Set-Location  $env:GOPATH\src\s\test
+            # dep ensure
+            # go test -v -timeout 60m
+      - task: PowerShell@2
+        displayName: Version the Module
+        condition: and( succeeded (), eq(variables['System.PullRequest.TargetBranch'], 'refs/heads/master'))
+        inputs:
+          errorActionPreference: stop
+          targetType: inline
+          script: |
+            $branch = "$(System.PullRequest.SourceBranch)"
+            Write-Host $branch
+            $tag = $branch.split("/")[-1]
+            Write-Host $tag
+            git tag $tag
+            if (-not $?) 
+            {
+            Write-Host "error creating tag"
+            throw 'error creating tag'
+            }
+            git push origin $tag
+            
+            
+            
+            
+            

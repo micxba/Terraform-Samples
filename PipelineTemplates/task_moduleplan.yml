@@ -1,0 +1,17 @@
+steps:
+- task: Bash@3
+  displayName: Output Plan
+  inputs:
+    workingDirectory: test/fixtures/plan
+    targetType: inline
+    failOnStderr: true
+    script: |
+        set -o allexport
+        source $(testenv.secureFilePath)
+        set +o allexport
+        terraform init
+        terraform plan -out $(Build.ArtifactStagingDirectory)/plan.tfplan | tee $(Build.ArtifactStagingDirectory)/plan.log
+        echo "PLAN SUMMARY"
+        echo "============"
+        terraform show -json $(Build.ArtifactStagingDirectory)/plan.tfplan | jq -r '.resource_changes[] | { address, change: .change.actions | join(", ") } | "\(.change): \(.address)"' | tee $(Build.ArtifactStagingDirectory)/plansummary.log
+        echo ""

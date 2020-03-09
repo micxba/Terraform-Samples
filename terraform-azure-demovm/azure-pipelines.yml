@@ -1,0 +1,128 @@
+name: terraform-azure-demovn
+resources: 
+  repositories:
+    - repository: templates
+      type: git
+      name: PipelineTemplates
+pool:
+  vmImage: 'ubuntu-16.04'
+trigger:
+- master
+- develop
+- feature/*
+- release/*
+- hotfix/*
+pr:
+- master
+- develop
+- feature/*
+- release/*
+- hotfix/*
+variables: 
+  moduleversion: 1.1.0
+  terraformversion: 0.12.17
+  dockerversion: 17.09.0-ce
+stages:
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: Validate
+        displayName: Code Check
+        steps:
+          - template: task_buildandpackageversion.yml@templates
+            parameters:
+              version: $(moduleversion)
+          - template: task_installterraform.yml@templates
+            parameters:
+              terraformversion: $(terraformversion)
+          - template: task_validate.yml@templates
+            parameters: 
+              terraformversion: $(terraformversion)
+  - stage: Test
+    dependsOn: Validate
+    displayName: Test
+    jobs:
+      - job: Test
+        displayName: Perform Tests
+        condition: and(succeeded(), or(ne(variables['Build.Reason'], 'PullRequest'), eq(variables['System.PullRequest.TargetBranch'], 'refs/heads/master')))
+        steps:
+          - template: task_moduletest.yml@templates
+            parameters: 
+              terraformversion: $(terraformversion)
+              dockerversion: $(dockerversion)
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Test Artifacts'
+            condition: always()
+            inputs:
+              artifactName: 'Test Results'
+  - stage: PlanandGraph
+    dependsOn: Test
+    displayName: Publish Module Plan and Graph
+    jobs:
+      - job: PlanandGraph
+        displayName: Plan and Graph
+        condition: succeeded()
+        steps:
+        - template: task_installterraform.yml@templates
+          parameters:
+            terraformversion: $(terraformversion)
+        - task: DownloadSecureFile@1
+          displayName: Download environment file for Terraform
+          name: testenv
+          inputs: 
+            secureFile: test.env       
+        - template: task_moduleplan.yml@templates
+        - template: task_modulegraph.yml@templates
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Test Artifacts'
+          condition: always()
+          inputs:
+            artifactName: 'Plan and Graph'
+  - stage: TagModule
+    dependsOn: Test
+    displayName: Tag Module for new Version
+    jobs:
+      - job: TagModule
+        displayName: Tag Module for new Version
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        steps:
+        - checkout: self
+          persistCredentials: true 
+        - task: PowerShell@2
+          displayName: Access to OAuth token
+          inputs: 
+            errorActionPreference: stop
+            targetType: inline
+            script: |
+              $url = "$($env:SYSTEM_TEAMFOUNDATIONCOLLECTIONURI)$env:SYSTEM_TEAMPROJECTID/_apis/build/definitions/$($env:SYSTEM_DEFINITIONID)?api-version=4.1-preview"
+              Write-Host "URL: $url"
+              $pipeline = Invoke-RestMethod -Uri $url -Headers @{
+              Authorization = "Bearer $env:TOKEN"
+              }
+              Write-Host "Pipeline = $($pipeline | ConvertTo-Json -Depth 100)"
+          env:
+            TOKEN: $(system.accesstoken)
+        - task: PowerShell@2
+          displayName: Version the Module
+          inputs:
+            errorActionPreference: stop
+            targetType: inline
+            script: |
+              git checkout master
+              Write-Host tagging to $(moduleversion)
+              $tag = "$(moduleversion)"
+              Write-Host $tag
+              git tag $tag
+              if (-not $?) 
+              {
+              Write-Host "error creating tag"
+              throw 'error creating tag'
+              }
+              git push origin $tag 
+
+        
+        
+
+          
+          
+
